@@ -28,6 +28,14 @@ export enum TeamMemberRole {
   Member = "member",
 }
 
+export enum PointsEventKind {
+  LessonComplete = "lesson_complete",
+  QuizPass = "quiz_pass",
+  QuizPerfect = "quiz_perfect",
+  CourseComplete = "course_complete",
+  StreakDay = "streak_day",
+}
+
 // ─── Tables ───
 
 export const users = sqliteTable("users", {
@@ -37,6 +45,7 @@ export const users = sqliteTable("users", {
   role: text("role").notNull().$type<UserRole>(),
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
+  timezone: text("timezone").notNull().default("UTC"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -234,6 +243,31 @@ export const coupons = sqliteTable("coupons", {
     .references(() => purchases.id),
   redeemedByUserId: integer("redeemed_by_user_id").references(() => users.id),
   redeemedAt: text("redeemed_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const pointsEvents = sqliteTable("points_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().$type<PointsEventKind>(),
+  points: integer("points").notNull(),
+  lessonId: integer("lesson_id").references(() => lessons.id, {
+    onDelete: "set null",
+  }),
+  quizId: integer("quiz_id").references(() => quizzes.id, {
+    onDelete: "set null",
+  }),
+  courseId: integer("course_id").references(() => courses.id, {
+    onDelete: "set null",
+  }),
+  streakDate: text("streak_date"),
+  isBackfill: integer("is_backfill", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

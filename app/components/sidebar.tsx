@@ -15,6 +15,7 @@ import {
   Sun,
   LogOut,
   Settings,
+  Sparkles,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -34,9 +35,15 @@ interface RecentCourse {
   progress: number;
 }
 
+interface UserPoints {
+  totalPoints: number;
+  levelName: string;
+}
+
 interface SidebarProps {
   currentUser: CurrentUser | null;
   recentCourses?: RecentCourse[];
+  userPoints?: UserPoints | null;
   isTeamAdmin?: boolean;
 }
 
@@ -95,6 +102,7 @@ function isVisible(item: NavItem, role: UserRole | null): boolean {
 export function Sidebar({
   currentUser,
   recentCourses = [],
+  userPoints = null,
   isTeamAdmin = false,
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
@@ -158,6 +166,21 @@ export function Sidebar({
           </NavLink>
         )}
       </nav>
+
+      {userPoints && (
+        <div className="border-t border-sidebar-border p-3">
+          <div className="flex items-center gap-2 rounded-md px-3 py-2 text-sm">
+            <Sparkles className="size-4 text-amber-500" />
+            <span className="font-medium tabular-nums">
+              {userPoints.totalPoints} pts
+            </span>
+            <span className="text-sidebar-foreground/50">·</span>
+            <span className="truncate text-sidebar-foreground/70">
+              {userPoints.levelName}
+            </span>
+          </div>
+        </div>
+      )}
 
       {recentCourses.length > 0 && (
         <div className="border-t border-sidebar-border p-3">

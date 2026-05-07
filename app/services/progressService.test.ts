@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
+import { eq } from "drizzle-orm";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -98,6 +99,24 @@ describe("progressService", () => {
       const progress = markLessonComplete(base.user.id, lessons[0].id);
 
       expect(progress.status).toBe(schema.LessonProgressStatus.Completed);
+    });
+
+    it("produces exactly one lesson_complete points event per (user, lesson)", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+
+      markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete(base.user.id, lessons[0].id);
+
+      const events = testDb
+        .select()
+        .from(schema.pointsEvents)
+        .where(eq(schema.pointsEvents.userId, base.user.id))
+        .all();
+
+      expect(events).toHaveLength(1);
+      expect(events[0].kind).toBe(schema.PointsEventKind.LessonComplete);
+      expect(events[0].points).toBe(10);
+      expect(events[0].lessonId).toBe(lessons[0].id);
     });
   });
 

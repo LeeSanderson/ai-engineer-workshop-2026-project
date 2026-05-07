@@ -11,8 +11,10 @@ import {
   getCompletedLessonCount,
   getTotalLessonCount,
 } from "~/services/progressService";
+import { getUserPoints } from "~/services/pointsService";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { isTeamAdmin } from "~/services/teamService";
+import { UserRole } from "~/db/schema";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
@@ -20,6 +22,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const currentUser = currentUserId ? getUserById(currentUserId) : null;
   const devCountry = await getDevCountry(request);
   const countryTierInfo = getCountryTierInfo(devCountry);
+
+  const userPoints =
+    currentUserId && currentUser?.role === UserRole.Student
+      ? (() => {
+          const { totalPoints, level } = getUserPoints(currentUserId);
+          return { totalPoints, levelName: level.name };
+        })()
+      : null;
 
   const recentCourses = currentUserId
     ? getRecentlyProgressedCourses(currentUserId).map((course) => {
@@ -57,6 +67,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null,
     recentCourses,
+    userPoints,
     devCountry,
     countryTierInfo,
     countries: COUNTRIES,
@@ -69,6 +80,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     users,
     currentUser,
     recentCourses,
+    userPoints,
     devCountry,
     countryTierInfo,
     countries,
@@ -80,6 +92,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
       <Sidebar
         currentUser={currentUser}
         recentCourses={recentCourses}
+        userPoints={userPoints}
         isTeamAdmin={userIsTeamAdmin}
       />
       <main className="flex-1 overflow-y-auto">

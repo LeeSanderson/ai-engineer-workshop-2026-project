@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(npm *)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git blame*)",
+      "Bash(git ls-files*)",
+      "Bash(git rev-parse*)",
+      "Bash(git describe*)",
+      "Bash(git fetch*)",
+      "Bash(git add*)",
+      "Bash(git commit*)"
     ]
   }
 }
