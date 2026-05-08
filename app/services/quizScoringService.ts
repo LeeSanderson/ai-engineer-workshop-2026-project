@@ -8,6 +8,7 @@ import {
   quizAnswers,
 } from "~/db/schema";
 import Database from "better-sqlite3";
+import { awardPointsForQuizAttempt } from "./pointsService";
 
 const rawDb = new Database("data.db");
 
@@ -259,6 +260,12 @@ export function computeResult(
           .run();
       }
     }
+
+    awardPointsForQuizAttempt(userId, {
+      quizId,
+      score: scoreValue,
+      passed,
+    });
 
     return {
       attemptId: attempt.id,
