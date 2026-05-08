@@ -9,6 +9,10 @@ import {
   LessonProgressStatus,
 } from "~/db/schema";
 import { awardPointsForLessonComplete } from "./pointsService";
+import {
+  findEnrollment,
+  markEnrollmentComplete,
+} from "./enrollmentService";
 
 // ─── Progress Service ───
 // Handles lesson completion tracking and course progress calculation.
@@ -81,8 +85,30 @@ export function markLessonComplete(userId: number, lessonId: number) {
         .get();
 
   awardPointsForLessonComplete(userId, lessonId);
+  maybeAutoCompleteCourse(userId, lessonId);
 
   return progress;
+}
+
+function maybeAutoCompleteCourse(userId: number, lessonId: number) {
+  const row = db
+    .select({ courseId: modules.courseId })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(lessons.id, lessonId))
+    .get();
+  if (!row) return;
+
+  const enrollment = findEnrollment(userId, row.courseId);
+  if (!enrollment || enrollment.completedAt !== null) return;
+
+  const total = getTotalLessonCount(row.courseId);
+  if (total === 0) return;
+
+  const completed = getCompletedLessonCount(userId, row.courseId);
+  if (completed >= total) {
+    markEnrollmentComplete(userId, row.courseId);
+  }
 }
 
 export function markLessonInProgress(userId: number, lessonId: number) {

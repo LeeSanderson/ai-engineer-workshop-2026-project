@@ -25,6 +25,7 @@ import {
   isLessonCompleted,
   getNextIncompleteLesson,
 } from "./progressService";
+import { enrollUser, findEnrollment } from "./enrollmentService";
 
 // Helper to create a module with lessons in the test db
 function createModuleWithLessons(
@@ -117,6 +118,76 @@ describe("progressService", () => {
       expect(events[0].kind).toBe(schema.PointsEventKind.LessonComplete);
       expect(events[0].points).toBe(10);
       expect(events[0].lessonId).toBe(lessons[0].id);
+    });
+  });
+
+  describe("markLessonComplete — course auto-completion", () => {
+    it("marks the enrollment complete when the final lesson is completed", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+      enrollUser(base.user.id, base.course.id, false, false);
+
+      markLessonComplete(base.user.id, lessons[0].id);
+
+      const enrollment = findEnrollment(base.user.id, base.course.id);
+      expect(enrollment).toBeDefined();
+      expect(enrollment!.completedAt).not.toBeNull();
+    });
+
+    it("does not mark the enrollment complete when other lessons remain", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
+      enrollUser(base.user.id, base.course.id, false, false);
+
+      markLessonComplete(base.user.id, lessons[0].id);
+
+      const enrollment = findEnrollment(base.user.id, base.course.id);
+      expect(enrollment!.completedAt).toBeNull();
+    });
+
+    it("is idempotent — re-completing the final lesson preserves completedAt and writes no extra course_complete event", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+      enrollUser(base.user.id, base.course.id, false, false);
+
+      markLessonComplete(base.user.id, lessons[0].id);
+      const firstStamp = findEnrollment(base.user.id, base.course.id)!.completedAt;
+
+      markLessonComplete(base.user.id, lessons[0].id);
+      const secondStamp = findEnrollment(base.user.id, base.course.id)!.completedAt;
+
+      expect(secondStamp).toBe(firstStamp);
+
+      const courseEvents = testDb
+        .select()
+        .from(schema.pointsEvents)
+        .where(eq(schema.pointsEvents.kind, schema.PointsEventKind.CourseComplete))
+        .all();
+      expect(courseEvents).toHaveLength(1);
+    });
+
+    it("does not throw and does not fabricate an enrollment when the user is not enrolled", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+
+      expect(() => markLessonComplete(base.user.id, lessons[0].id)).not.toThrow();
+
+      const enrollment = findEnrollment(base.user.id, base.course.id);
+      expect(enrollment).toBeUndefined();
+    });
+
+    it("triggers completion when the final lesson is in a later module", () => {
+      const m1 = createModuleWithLessons(base.course.id, "Module 1", 1, 2);
+      const m2 = createModuleWithLessons(base.course.id, "Module 2", 2, 2);
+      enrollUser(base.user.id, base.course.id, false, false);
+
+      markLessonComplete(base.user.id, m1.lessons[0].id);
+      markLessonComplete(base.user.id, m1.lessons[1].id);
+      markLessonComplete(base.user.id, m2.lessons[0].id);
+
+      let enrollment = findEnrollment(base.user.id, base.course.id);
+      expect(enrollment!.completedAt).toBeNull();
+
+      markLessonComplete(base.user.id, m2.lessons[1].id);
+
+      enrollment = findEnrollment(base.user.id, base.course.id);
+      expect(enrollment!.completedAt).not.toBeNull();
     });
   });
 
