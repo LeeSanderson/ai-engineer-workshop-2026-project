@@ -6,9 +6,6 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-# jq filter to extract streaming text from assistant messages
-stream_text='select(.type == "assistant").message.content[]? | select(.type == "text").text // empty | gsub("\n"; "\r\n") | . + "\r\n\n"'
-
 # jq filter to extract final result
 final_result='select(.type == "result").result // empty'
 
@@ -23,11 +20,16 @@ for ((i=1; i<=$1; i++)); do
   docker sandbox run claude . -- \
     --verbose \
     --print \
-    --output-format stream-json \
-    "Previous commits: $commits Issues: $issues $prompt" \
+    --output-format stream-json <<EOF \
   | grep --line-buffered '^{' \
   | tee "$tmpfile" \
-  | jq --unbuffered -rj "$stream_text"
+  | jq --unbuffered -rf ralph/format.jq
+Previous commits: $commits
+
+Issues: $issues
+
+$prompt
+EOF
 
   result=$(jq -r "$final_result" "$tmpfile")
 
