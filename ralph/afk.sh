@@ -58,7 +58,8 @@ for ((i=1; i<=iterations; i++)); do
   # `set +e` + PIPESTATUS so we can see the docker exit code even when later
   # stages of the pipeline (grep/jq) fail to find anything.
   set +e
-  docker sandbox exec -i -w "$PWD" -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$sandbox_name" claude \
+  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+    docker sandbox exec -i -w "$PWD" -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$sandbox_name" claude \
       --verbose \
       --print \
       --output-format stream-json <<EOF \
