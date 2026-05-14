@@ -62,6 +62,7 @@ for ((i=1; i<=iterations; i++)); do
     docker sandbox exec -i -w "$PWD" -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$sandbox_name" claude \
       --verbose \
       --print \
+      --permission-mode acceptEdits \
       --output-format stream-json <<EOF \
     | { grep --line-buffered '^{' || true; } \
     | tee "$tmpfile" \
