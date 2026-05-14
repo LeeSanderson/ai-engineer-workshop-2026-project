@@ -38,7 +38,7 @@ trap 'rm -f "$tmpfile"' EXIT
 sandbox_name="claude-$(basename "$PWD")"
 if ! docker sandbox ls -q 2>/dev/null | grep -qx "$sandbox_name"; then
   echo "Creating sandbox $sandbox_name with workspace $PWD..." >&2
-  docker sandbox create claude --name "$sandbox_name" "$PWD" >&2
+  docker sandbox create --name "$sandbox_name" claude "$PWD" >&2
 fi
 
 # jq filter to extract final result
