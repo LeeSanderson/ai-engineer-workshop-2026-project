@@ -37,8 +37,8 @@ trap 'rm -f "$tmpfile"' EXIT
 # --print mode, so we use `exec -i` against a pre-created sandbox instead.
 sandbox_name="claude-$(basename "$PWD")"
 if ! docker sandbox ls -q 2>/dev/null | grep -qx "$sandbox_name"; then
-  echo "Creating sandbox $sandbox_name..." >&2
-  docker sandbox create claude --name "$sandbox_name" >&2
+  echo "Creating sandbox $sandbox_name with workspace $PWD..." >&2
+  docker sandbox create claude --name "$sandbox_name" "$PWD" >&2
 fi
 
 # jq filter to extract final result
@@ -58,7 +58,7 @@ for ((i=1; i<=iterations; i++)); do
   # `set +e` + PIPESTATUS so we can see the docker exit code even when later
   # stages of the pipeline (grep/jq) fail to find anything.
   set +e
-  docker sandbox exec -i -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$sandbox_name" claude \
+  docker sandbox exec -i -w "$PWD" -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" "$sandbox_name" claude \
       --verbose \
       --print \
       --output-format stream-json <<EOF \
