@@ -1,6 +1,14 @@
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and, isNotNull, asc } from "drizzle-orm";
 import { db } from "~/db";
-import { pointsEvents, PointsEventKind, users } from "~/db/schema";
+import {
+  pointsEvents,
+  PointsEventKind,
+  users,
+  lessonProgress,
+  LessonProgressStatus,
+  quizAttempts,
+  enrollments,
+} from "~/db/schema";
 import { resolveLevel, type ResolvedLevel } from "./levelResolver";
 import {
   computeStreak,
@@ -115,6 +123,113 @@ export function awardPointsForCourseComplete(userId: number, courseId: number) {
     })
     .onConflictDoNothing()
     .run();
+}
+
+export function backfillUserPoints(userId: number): void {
+  const completedLessons = db
+    .select({
+      lessonId: lessonProgress.lessonId,
+      completedAt: lessonProgress.completedAt,
+    })
+    .from(lessonProgress)
+    .where(
+      and(
+        eq(lessonProgress.userId, userId),
+        eq(lessonProgress.status, LessonProgressStatus.Completed)
+      )
+    )
+    .all();
+
+  for (const row of completedLessons) {
+    if (!row.completedAt) continue;
+    db.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.LessonComplete,
+        points: LESSON_COMPLETE_POINTS,
+        lessonId: row.lessonId,
+        isBackfill: true,
+        createdAt: row.completedAt,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  // Ordering by attemptedAt ASC ensures INSERT OR IGNORE keeps the earliest
+  // passing attempt per (user, quiz) and the earliest 100% attempt per (user, quiz).
+  const passingAttempts = db
+    .select({
+      quizId: quizAttempts.quizId,
+      score: quizAttempts.score,
+      attemptedAt: quizAttempts.attemptedAt,
+    })
+    .from(quizAttempts)
+    .where(
+      and(eq(quizAttempts.userId, userId), eq(quizAttempts.passed, true))
+    )
+    .orderBy(asc(quizAttempts.attemptedAt))
+    .all();
+
+  for (const row of passingAttempts) {
+    db.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.QuizPass,
+        points: QUIZ_PASS_POINTS,
+        quizId: row.quizId,
+        isBackfill: true,
+        createdAt: row.attemptedAt,
+      })
+      .onConflictDoNothing()
+      .run();
+
+    if (row.score >= 1) {
+      db.insert(pointsEvents)
+        .values({
+          userId,
+          kind: PointsEventKind.QuizPerfect,
+          points: QUIZ_PERFECT_POINTS,
+          quizId: row.quizId,
+          isBackfill: true,
+          createdAt: row.attemptedAt,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
+
+  const completedEnrollments = db
+    .select({
+      courseId: enrollments.courseId,
+      completedAt: enrollments.completedAt,
+    })
+    .from(enrollments)
+    .where(
+      and(eq(enrollments.userId, userId), isNotNull(enrollments.completedAt))
+    )
+    .all();
+
+  for (const row of completedEnrollments) {
+    if (!row.completedAt) continue;
+    db.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.CourseComplete,
+        points: COURSE_COMPLETE_POINTS,
+        courseId: row.courseId,
+        isBackfill: true,
+        createdAt: row.completedAt,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+}
+
+export function backfillAllUsersPoints(): void {
+  const allUsers = db.select({ id: users.id }).from(users).all();
+  for (const user of allUsers) {
+    backfillUserPoints(user.id);
+  }
 }
 
 export interface UserPoints extends StreakResult {

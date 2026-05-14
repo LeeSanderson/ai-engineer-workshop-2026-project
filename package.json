@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx scripts/seed.ts",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx scripts/migrate.ts",
     "loc": "git ls-files | grep -vE '(lock|.db|_snapshot.json)' | xargs wc -l"
   },
   "dependencies": {

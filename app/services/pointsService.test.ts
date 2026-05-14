@@ -16,6 +16,7 @@ import {
   awardPointsForLessonComplete,
   awardPointsForQuizAttempt,
   awardPointsForCourseComplete,
+  backfillUserPoints,
   getUserPoints,
 } from "./pointsService";
 
@@ -485,6 +486,375 @@ describe("pointsService", () => {
       expect(result.totalPoints).toBe(10);
       expect(result.currentStreak).toBe(0);
       expect(result.longestStreak).toBe(0);
+    });
+  });
+
+  describe("backfillUserPoints", () => {
+    it("writes a lesson_complete event with isBackfill=true and createdAt from completedAt for each completed lessonProgress row", () => {
+      const l1 = createLesson();
+      const l2 = createLesson();
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: base.user.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-01T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            lessonId: l2.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-02T10:00:00.000Z",
+          },
+        ])
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const events = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.LessonComplete
+      );
+      expect(events).toHaveLength(2);
+      for (const ev of events) {
+        expect(ev.isBackfill).toBe(true);
+        expect(ev.points).toBe(10);
+      }
+      const byLesson = new Map(events.map((e) => [e.lessonId, e.createdAt]));
+      expect(byLesson.get(l1.id)).toBe("2026-04-01T10:00:00.000Z");
+      expect(byLesson.get(l2.id)).toBe("2026-04-02T10:00:00.000Z");
+    });
+
+    it("ignores lessonProgress rows that are not completed", () => {
+      const l1 = createLesson();
+      testDb
+        .insert(schema.lessonProgress)
+        .values({
+          userId: base.user.id,
+          lessonId: l1.id,
+          status: schema.LessonProgressStatus.InProgress,
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const events = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.LessonComplete
+      );
+      expect(events).toHaveLength(0);
+    });
+
+    it("writes quiz_pass with isBackfill=true and original timestamp from the first passing attempt per (user, quiz)", () => {
+      const quiz = createQuiz();
+      // Earlier failing attempt, later passing attempt — should not be picked
+      testDb
+        .insert(schema.quizAttempts)
+        .values([
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.5,
+            passed: false,
+            attemptedAt: "2026-04-01T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.8,
+            passed: true,
+            attemptedAt: "2026-04-02T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.9,
+            passed: true,
+            attemptedAt: "2026-04-03T10:00:00.000Z",
+          },
+        ])
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const events = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.QuizPass
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0].isBackfill).toBe(true);
+      expect(events[0].points).toBe(25);
+      expect(events[0].quizId).toBe(quiz.id);
+      expect(events[0].createdAt).toBe("2026-04-02T10:00:00.000Z");
+    });
+
+    it("writes quiz_perfect from the first 100% attempt with that attempt's original timestamp", () => {
+      const quiz = createQuiz();
+      // First pass at 0.8, later perfect — pass takes earlier ts, perfect takes its own ts
+      testDb
+        .insert(schema.quizAttempts)
+        .values([
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 0.8,
+            passed: true,
+            attemptedAt: "2026-04-02T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 1.0,
+            passed: true,
+            attemptedAt: "2026-04-05T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            quizId: quiz.id,
+            score: 1.0,
+            passed: true,
+            attemptedAt: "2026-04-06T10:00:00.000Z",
+          },
+        ])
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const pass = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.QuizPass
+      );
+      const perfect = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.QuizPerfect
+      );
+      expect(pass).toHaveLength(1);
+      expect(pass[0].createdAt).toBe("2026-04-02T10:00:00.000Z");
+      expect(perfect).toHaveLength(1);
+      expect(perfect[0].isBackfill).toBe(true);
+      expect(perfect[0].points).toBe(15);
+      expect(perfect[0].createdAt).toBe("2026-04-05T10:00:00.000Z");
+    });
+
+    it("writes a course_complete event with isBackfill=true and createdAt from enrollment.completedAt", () => {
+      testDb
+        .insert(schema.enrollments)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          enrolledAt: "2026-03-01T10:00:00.000Z",
+          completedAt: "2026-04-10T10:00:00.000Z",
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const events = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.CourseComplete
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0].isBackfill).toBe(true);
+      expect(events[0].points).toBe(100);
+      expect(events[0].courseId).toBe(base.course.id);
+      expect(events[0].createdAt).toBe("2026-04-10T10:00:00.000Z");
+    });
+
+    it("ignores enrollments with null completedAt", () => {
+      testDb
+        .insert(schema.enrollments)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          enrolledAt: "2026-03-01T10:00:00.000Z",
+          completedAt: null,
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const events = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.CourseComplete
+      );
+      expect(events).toHaveLength(0);
+    });
+
+    it("writes no streak_day events even for users with consecutive historical activity", () => {
+      const l1 = createLesson();
+      const l2 = createLesson();
+      const l3 = createLesson();
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: base.user.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-01T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            lessonId: l2.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-02T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            lessonId: l3.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-03T10:00:00.000Z",
+          },
+        ])
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const streakEvents = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.StreakDay
+      );
+      expect(streakEvents).toHaveLength(0);
+    });
+
+    it("is idempotent: running twice produces the same row count and identical events", () => {
+      const lesson = createLesson();
+      const quiz = createQuiz();
+      testDb
+        .insert(schema.lessonProgress)
+        .values({
+          userId: base.user.id,
+          lessonId: lesson.id,
+          status: schema.LessonProgressStatus.Completed,
+          completedAt: "2026-04-01T10:00:00.000Z",
+        })
+        .run();
+      testDb
+        .insert(schema.quizAttempts)
+        .values({
+          userId: base.user.id,
+          quizId: quiz.id,
+          score: 1.0,
+          passed: true,
+          attemptedAt: "2026-04-02T10:00:00.000Z",
+        })
+        .run();
+      testDb
+        .insert(schema.enrollments)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          enrolledAt: "2026-03-01T10:00:00.000Z",
+          completedAt: "2026-04-03T10:00:00.000Z",
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+      const firstRun = testDb
+        .select()
+        .from(schema.pointsEvents)
+        .where(eq(schema.pointsEvents.userId, base.user.id))
+        .all();
+
+      backfillUserPoints(base.user.id);
+      const secondRun = testDb
+        .select()
+        .from(schema.pointsEvents)
+        .where(eq(schema.pointsEvents.userId, base.user.id))
+        .all();
+
+      expect(secondRun).toHaveLength(firstRun.length);
+      expect(secondRun.map((e) => e.id).sort()).toEqual(
+        firstRun.map((e) => e.id).sort()
+      );
+    });
+
+    it("after backfill, getUserPoints returns the expected total/level and currentStreak=0", () => {
+      const l1 = createLesson();
+      const l2 = createLesson();
+      const quiz = createQuiz();
+      testDb
+        .insert(schema.lessonProgress)
+        .values([
+          {
+            userId: base.user.id,
+            lessonId: l1.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-01T10:00:00.000Z",
+          },
+          {
+            userId: base.user.id,
+            lessonId: l2.id,
+            status: schema.LessonProgressStatus.Completed,
+            completedAt: "2026-04-02T10:00:00.000Z",
+          },
+        ])
+        .run();
+      testDb
+        .insert(schema.quizAttempts)
+        .values({
+          userId: base.user.id,
+          quizId: quiz.id,
+          score: 1.0,
+          passed: true,
+          attemptedAt: "2026-04-03T10:00:00.000Z",
+        })
+        .run();
+      testDb
+        .insert(schema.enrollments)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          enrolledAt: "2026-03-01T10:00:00.000Z",
+          completedAt: "2026-04-04T10:00:00.000Z",
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      // 2 lessons × 10 + quiz pass 25 + quiz perfect 15 + course 100 = 160
+      const result = getUserPoints(base.user.id);
+      expect(result.totalPoints).toBe(160);
+      expect(result.level.name).toBe("Student");
+      expect(result.currentStreak).toBe(0);
+      expect(result.longestStreak).toBe(0);
+    });
+
+    it("does not write events for users other than the target user", () => {
+      const otherUser = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      const lesson = createLesson();
+      testDb
+        .insert(schema.lessonProgress)
+        .values({
+          userId: otherUser.id,
+          lessonId: lesson.id,
+          status: schema.LessonProgressStatus.Completed,
+          completedAt: "2026-04-01T10:00:00.000Z",
+        })
+        .run();
+
+      backfillUserPoints(base.user.id);
+
+      const baseEvents = eventsOfKind(
+        base.user.id,
+        schema.PointsEventKind.LessonComplete
+      );
+      const otherEvents = eventsOfKind(
+        otherUser.id,
+        schema.PointsEventKind.LessonComplete
+      );
+      expect(baseEvents).toHaveLength(0);
+      expect(otherEvents).toHaveLength(0);
     });
   });
 });
