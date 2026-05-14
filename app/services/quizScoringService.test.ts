@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -157,16 +157,24 @@ describe("quizScoringService.computeResult — points wiring", () => {
     expect(result.passed).toBe(true);
     expect(result.score).toBeCloseTo(0.75, 5);
 
-    const events = testDb
+    const quizEvents = testDb
       .select()
       .from(schema.pointsEvents)
-      .where(eq(schema.pointsEvents.userId, base.user.id))
+      .where(
+        and(
+          eq(schema.pointsEvents.userId, base.user.id),
+          inArray(schema.pointsEvents.kind, [
+            schema.PointsEventKind.QuizPass,
+            schema.PointsEventKind.QuizPerfect,
+          ])
+        )
+      )
       .all();
 
-    expect(events).toHaveLength(1);
-    expect(events[0].kind).toBe(schema.PointsEventKind.QuizPass);
-    expect(events[0].points).toBe(25);
-    expect(events[0].quizId).toBe(setup.quiz.id);
+    expect(quizEvents).toHaveLength(1);
+    expect(quizEvents[0].kind).toBe(schema.PointsEventKind.QuizPass);
+    expect(quizEvents[0].points).toBe(25);
+    expect(quizEvents[0].quizId).toBe(setup.quiz.id);
   });
 
   it("writes both quiz_pass and quiz_perfect on a perfect score", () => {
@@ -180,14 +188,22 @@ describe("quizScoringService.computeResult — points wiring", () => {
     expect(result.passed).toBe(true);
     expect(result.score).toBe(1);
 
-    const events = testDb
+    const quizEvents = testDb
       .select()
       .from(schema.pointsEvents)
-      .where(eq(schema.pointsEvents.userId, base.user.id))
+      .where(
+        and(
+          eq(schema.pointsEvents.userId, base.user.id),
+          inArray(schema.pointsEvents.kind, [
+            schema.PointsEventKind.QuizPass,
+            schema.PointsEventKind.QuizPerfect,
+          ])
+        )
+      )
       .all();
 
-    expect(events).toHaveLength(2);
-    const totalPoints = events.reduce((sum, e) => sum + e.points, 0);
+    expect(quizEvents).toHaveLength(2);
+    const totalPoints = quizEvents.reduce((sum, e) => sum + e.points, 0);
     expect(totalPoints).toBe(40);
   });
 
@@ -207,12 +223,20 @@ describe("quizScoringService.computeResult — points wiring", () => {
       [q2.id]: q2Wrong.id,
     });
 
-    const events = testDb
+    const quizEvents = testDb
       .select()
       .from(schema.pointsEvents)
-      .where(eq(schema.pointsEvents.userId, base.user.id))
+      .where(
+        and(
+          eq(schema.pointsEvents.userId, base.user.id),
+          inArray(schema.pointsEvents.kind, [
+            schema.PointsEventKind.QuizPass,
+            schema.PointsEventKind.QuizPerfect,
+          ])
+        )
+      )
       .all();
 
-    expect(events).toHaveLength(2); // still just the initial pass + perfect
+    expect(quizEvents).toHaveLength(2); // still just the initial pass + perfect
   });
 });

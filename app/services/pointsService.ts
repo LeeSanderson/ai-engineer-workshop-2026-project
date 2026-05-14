@@ -1,7 +1,12 @@
 import { sql, eq } from "drizzle-orm";
 import { db } from "~/db";
-import { pointsEvents, PointsEventKind } from "~/db/schema";
+import { pointsEvents, PointsEventKind, users } from "~/db/schema";
 import { resolveLevel, type ResolvedLevel } from "./levelResolver";
+import {
+  computeStreak,
+  toCalendarDate,
+  type StreakResult,
+} from "./streakCalculator";
 
 // ─── Points Service ───
 // Coordinator module orchestrating the points_events table.
@@ -12,17 +17,42 @@ const LESSON_COMPLETE_POINTS = 10;
 const QUIZ_PASS_POINTS = 25;
 const QUIZ_PERFECT_POINTS = 15;
 const COURSE_COMPLETE_POINTS = 100;
+const STREAK_DAY_POINTS = 5;
+
+function getUserTimezone(userId: number): string {
+  const row = db
+    .select({ timezone: users.timezone })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get();
+  return row?.timezone ?? "UTC";
+}
 
 export function awardPointsForLessonComplete(userId: number, lessonId: number) {
-  db.insert(pointsEvents)
-    .values({
-      userId,
-      kind: PointsEventKind.LessonComplete,
-      points: LESSON_COMPLETE_POINTS,
-      lessonId,
-    })
-    .onConflictDoNothing()
-    .run();
+  const timezone = getUserTimezone(userId);
+  const streakDate = toCalendarDate(new Date().toISOString(), timezone);
+
+  db.transaction((tx) => {
+    tx.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.LessonComplete,
+        points: LESSON_COMPLETE_POINTS,
+        lessonId,
+      })
+      .onConflictDoNothing()
+      .run();
+
+    tx.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.StreakDay,
+        points: STREAK_DAY_POINTS,
+        streakDate,
+      })
+      .onConflictDoNothing()
+      .run();
+  });
 }
 
 export interface QuizAttemptForPoints {
@@ -37,27 +67,42 @@ export function awardPointsForQuizAttempt(
 ) {
   if (!attempt.passed) return;
 
-  db.insert(pointsEvents)
-    .values({
-      userId,
-      kind: PointsEventKind.QuizPass,
-      points: QUIZ_PASS_POINTS,
-      quizId: attempt.quizId,
-    })
-    .onConflictDoNothing()
-    .run();
+  const timezone = getUserTimezone(userId);
+  const streakDate = toCalendarDate(new Date().toISOString(), timezone);
 
-  if (attempt.score >= 1) {
-    db.insert(pointsEvents)
+  db.transaction((tx) => {
+    tx.insert(pointsEvents)
       .values({
         userId,
-        kind: PointsEventKind.QuizPerfect,
-        points: QUIZ_PERFECT_POINTS,
+        kind: PointsEventKind.QuizPass,
+        points: QUIZ_PASS_POINTS,
         quizId: attempt.quizId,
       })
       .onConflictDoNothing()
       .run();
-  }
+
+    if (attempt.score >= 1) {
+      tx.insert(pointsEvents)
+        .values({
+          userId,
+          kind: PointsEventKind.QuizPerfect,
+          points: QUIZ_PERFECT_POINTS,
+          quizId: attempt.quizId,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+
+    tx.insert(pointsEvents)
+      .values({
+        userId,
+        kind: PointsEventKind.StreakDay,
+        points: STREAK_DAY_POINTS,
+        streakDate,
+      })
+      .onConflictDoNothing()
+      .run();
+  });
 }
 
 export function awardPointsForCourseComplete(userId: number, courseId: number) {
@@ -72,22 +117,37 @@ export function awardPointsForCourseComplete(userId: number, courseId: number) {
     .run();
 }
 
-export interface UserPoints {
+export interface UserPoints extends StreakResult {
   totalPoints: number;
   level: ResolvedLevel;
 }
 
 export function getUserPoints(userId: number): UserPoints {
-  const result = db
+  const totalRow = db
     .select({ total: sql<number>`COALESCE(SUM(${pointsEvents.points}), 0)` })
     .from(pointsEvents)
     .where(eq(pointsEvents.userId, userId))
     .get();
 
-  const totalPoints = result?.total ?? 0;
+  const totalPoints = totalRow?.total ?? 0;
+
+  const eventRows = db
+    .select({
+      timestamp: pointsEvents.createdAt,
+      kind: pointsEvents.kind,
+      isBackfill: pointsEvents.isBackfill,
+      streakDate: pointsEvents.streakDate,
+    })
+    .from(pointsEvents)
+    .where(eq(pointsEvents.userId, userId))
+    .all();
+
+  const timezone = getUserTimezone(userId);
+  const streak = computeStreak(eventRows, timezone);
 
   return {
     totalPoints,
     level: resolveLevel(totalPoints),
+    ...streak,
   };
 }

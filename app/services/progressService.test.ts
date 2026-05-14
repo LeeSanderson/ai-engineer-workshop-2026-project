@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -108,16 +108,20 @@ describe("progressService", () => {
       markLessonComplete(base.user.id, lessons[0].id);
       markLessonComplete(base.user.id, lessons[0].id);
 
-      const events = testDb
+      const lessonEvents = testDb
         .select()
         .from(schema.pointsEvents)
-        .where(eq(schema.pointsEvents.userId, base.user.id))
+        .where(
+          and(
+            eq(schema.pointsEvents.userId, base.user.id),
+            eq(schema.pointsEvents.kind, schema.PointsEventKind.LessonComplete)
+          )
+        )
         .all();
 
-      expect(events).toHaveLength(1);
-      expect(events[0].kind).toBe(schema.PointsEventKind.LessonComplete);
-      expect(events[0].points).toBe(10);
-      expect(events[0].lessonId).toBe(lessons[0].id);
+      expect(lessonEvents).toHaveLength(1);
+      expect(lessonEvents[0].points).toBe(10);
+      expect(lessonEvents[0].lessonId).toBe(lessons[0].id);
     });
   });
 

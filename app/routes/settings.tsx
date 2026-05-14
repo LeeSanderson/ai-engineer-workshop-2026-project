@@ -4,7 +4,11 @@ import { toast } from "sonner";
 import { z } from "zod";
 import type { Route } from "./+types/settings";
 import { getCurrentUserId } from "~/lib/session";
-import { getUserById, updateUser } from "~/services/userService";
+import {
+  getUserById,
+  updateUser,
+  setUserTimezone,
+} from "~/services/userService";
 import { parseFormData } from "~/lib/validation";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
@@ -15,9 +19,20 @@ import { UserRole } from "~/db/schema";
 import { AlertTriangle } from "lucide-react";
 import { data, isRouteErrorResponse, Link } from "react-router";
 
+const TIMEZONES: readonly string[] = (() => {
+  const supported = (Intl as unknown as {
+    supportedValuesOf?: (key: string) => string[];
+  }).supportedValuesOf;
+  if (typeof supported === "function") {
+    return supported("timeZone");
+  }
+  return ["UTC"];
+})();
+
 const settingsSchema = z.object({
   name: z.string().trim().min(1, "Name cannot be empty."),
   bio: z.string().trim().optional(),
+  timezone: z.string().trim().min(1, "Timezone is required."),
 });
 
 export function meta() {
@@ -49,7 +64,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       email: currentUser.email,
       bio: currentUser.bio,
       role: currentUser.role,
+      timezone: currentUser.timezone,
     },
+    timezones: TIMEZONES,
   };
 }
 
@@ -72,14 +89,22 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ errors: parsed.errors }, { status: 400 });
   }
 
-  const { name, bio } = parsed.data;
+  const { name, bio, timezone } = parsed.data;
 
   updateUser(currentUser.id, name, currentUser.email, bio || null);
+  try {
+    setUserTimezone(currentUser.id, timezone);
+  } catch {
+    return data(
+      { errors: { timezone: "Invalid timezone." } },
+      { status: 400 }
+    );
+  }
   return { success: true };
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { user } = loaderData;
+  const { user, timezones } = loaderData;
   const fetcher = useFetcher();
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -156,6 +181,24 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                 </p>
               </div>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="timezone">Timezone</Label>
+              <select
+                id="timezone"
+                name="timezone"
+                defaultValue={user.timezone}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {timezones.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Used to count your daily streak in your local time.
+              </p>
+            </div>
             <Button
               type="submit"
               disabled={fetcher.state !== "idle"}

@@ -1,4 +1,5 @@
 import { Outlet } from "react-router";
+import { useEffect } from "react";
 import type { Route } from "./+types/layout.app";
 import { Sidebar } from "~/components/sidebar";
 import { DevUI } from "~/components/dev-ui";
@@ -26,8 +27,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   const userPoints =
     currentUserId && currentUser?.role === UserRole.Student
       ? (() => {
-          const { totalPoints, level } = getUserPoints(currentUserId);
-          return { totalPoints, levelName: level.name };
+          const points = getUserPoints(currentUserId);
+          const todayLocal = new Intl.DateTimeFormat("en-CA", {
+            timeZone: currentUser?.timezone ?? "UTC",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date());
+          return {
+            totalPoints: points.totalPoints,
+            levelName: points.level.name,
+            currentStreak: points.currentStreak,
+            activeToday: points.lastActiveDate === todayLocal,
+          };
         })()
       : null;
 
@@ -64,6 +76,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           name: currentUser.name,
           role: currentUser.role,
           avatarUrl: currentUser.avatarUrl ?? null,
+          timezone: currentUser.timezone,
         }
       : null,
     recentCourses,
@@ -86,6 +99,21 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countries,
     isTeamAdmin: userIsTeamAdmin,
   } = loaderData;
+
+  useEffect(() => {
+    if (!currentUser || currentUser.timezone !== "UTC") return;
+    let browserZone: string;
+    try {
+      browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return;
+    }
+    if (!browserZone || browserZone === "UTC") return;
+
+    const form = new FormData();
+    form.set("timezone", browserZone);
+    fetch("/api/set-timezone", { method: "POST", body: form }).catch(() => {});
+  }, [currentUser?.id, currentUser?.timezone]);
 
   return (
     <div className="flex h-screen overflow-hidden">

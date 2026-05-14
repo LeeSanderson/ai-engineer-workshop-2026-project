@@ -16,6 +16,7 @@ import {
   LogOut,
   Settings,
   Sparkles,
+  Flame,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -38,6 +39,8 @@ interface RecentCourse {
 interface UserPoints {
   totalPoints: number;
   levelName: string;
+  currentStreak: number;
+  activeToday: boolean;
 }
 
 interface SidebarProps {
@@ -168,7 +171,7 @@ export function Sidebar({
       </nav>
 
       {userPoints && (
-        <div className="border-t border-sidebar-border p-3">
+        <div className="border-t border-sidebar-border p-3 space-y-1">
           <div className="flex items-center gap-2 rounded-md px-3 py-2 text-sm">
             <Sparkles className="size-4 text-amber-500" />
             <span className="font-medium tabular-nums">
@@ -177,6 +180,16 @@ export function Sidebar({
             <span className="text-sidebar-foreground/50">·</span>
             <span className="truncate text-sidebar-foreground/70">
               {userPoints.levelName}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-md px-3 py-2 text-sm">
+            {userPoints.activeToday ? (
+              <Flame className="size-4 text-orange-500" />
+            ) : (
+              <Flame className="size-4 text-sidebar-foreground/30" />
+            )}
+            <span className="font-medium tabular-nums">
+              {userPoints.currentStreak}-day streak
             </span>
           </div>
         </div>
