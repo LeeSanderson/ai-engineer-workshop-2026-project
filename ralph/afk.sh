@@ -12,14 +12,17 @@ if [ "$DEBUG" = "1" ]; then
   set -x
 fi
 
-if [ ! -f .env ]; then
-  echo "Error: .env file not found. Create one with ANTHROPIC_API_KEY=..." >&2
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+env_file="$script_dir/.env"
+
+if [ ! -f "$env_file" ]; then
+  echo "Error: $env_file not found. Create one with ANTHROPIC_API_KEY=..." >&2
   exit 1
 fi
 
 set -a
 # shellcheck disable=SC1091
-. ./.env
+. "$env_file"
 set +a
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
