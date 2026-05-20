@@ -3,11 +3,17 @@ import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount, getTotalLessonCount, getNextIncompleteLesson } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
+import { getUserById } from "~/services/userService";
+import { getUserPoints, getRecentPointsEvents } from "~/services/pointsService";
+import { LEVELS } from "~/services/levelResolver";
+import { toCalendarDate } from "~/services/streakCalculator";
+import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { AlertTriangle, BookOpen, CheckCircle2, GraduationCap, PlayCircle } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
+import { GamificationPanel } from "~/components/gamification-panel";
 import { data, isRouteErrorResponse } from "react-router";
 
 export function meta() {
@@ -59,7 +65,36 @@ export async function loader({ request }: Route.LoaderArgs) {
   const completedCourses = coursesWithProgress.filter((c) => c.isCompleted);
   const inProgressCourses = coursesWithProgress.filter((c) => !c.isCompleted);
 
-  return { inProgressCourses, completedCourses };
+  const currentUser = getUserById(currentUserId);
+  const gamification =
+    currentUser?.role === UserRole.Student
+      ? (() => {
+          const points = getUserPoints(currentUserId);
+          const timezone = currentUser.timezone ?? "UTC";
+          const today = toCalendarDate(new Date().toISOString(), timezone);
+          const nextLevel =
+            points.level.nextThreshold !== null
+              ? LEVELS.find((l) => l.threshold === points.level.nextThreshold) ?? null
+              : null;
+          const levelSpan = nextLevel
+            ? nextLevel.threshold - points.level.threshold
+            : null;
+          return {
+            totalPoints: points.totalPoints,
+            levelName: points.level.name,
+            nextLevelName: nextLevel?.name ?? null,
+            pointsIntoLevel: points.level.pointsIntoLevel,
+            levelSpan,
+            pointsToNextLevel: points.level.pointsToNextLevel,
+            currentStreak: points.currentStreak,
+            longestStreak: points.longestStreak,
+            activeToday: points.lastActiveDate === today,
+            recentEvents: getRecentPointsEvents(currentUserId, 8),
+          };
+        })()
+      : null;
+
+  return { inProgressCourses, completedCourses, gamification };
 }
 
 function DashboardCardSkeleton() {
@@ -102,7 +137,7 @@ export function HydrateFallback() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { inProgressCourses, completedCourses } = loaderData;
+  const { inProgressCourses, completedCourses, gamification } = loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
 
   return (
@@ -122,6 +157,8 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           Track your learning progress
         </p>
       </div>
+
+      {gamification && <GamificationPanel {...gamification} />}
 
       {totalCourses === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

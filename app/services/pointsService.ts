@@ -1,4 +1,4 @@
-import { sql, eq, and, isNotNull, asc } from "drizzle-orm";
+import { sql, eq, and, isNotNull, asc, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
   pointsEvents,
@@ -235,6 +235,29 @@ export function backfillAllUsersPoints(): void {
 export interface UserPoints extends StreakResult {
   totalPoints: number;
   level: ResolvedLevel;
+}
+
+export interface RecentPointsEvent {
+  kind: PointsEventKind;
+  points: number;
+  createdAt: string;
+}
+
+export function getRecentPointsEvents(
+  userId: number,
+  limit: number
+): RecentPointsEvent[] {
+  return db
+    .select({
+      kind: pointsEvents.kind,
+      points: pointsEvents.points,
+      createdAt: pointsEvents.createdAt,
+    })
+    .from(pointsEvents)
+    .where(eq(pointsEvents.userId, userId))
+    .orderBy(desc(pointsEvents.createdAt), desc(pointsEvents.id))
+    .limit(limit)
+    .all();
 }
 
 export function getUserPoints(userId: number): UserPoints {

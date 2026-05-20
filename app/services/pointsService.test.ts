@@ -18,6 +18,7 @@ import {
   awardPointsForCourseComplete,
   backfillUserPoints,
   getUserPoints,
+  getRecentPointsEvents,
 } from "./pointsService";
 
 function createLesson() {
@@ -486,6 +487,70 @@ describe("pointsService", () => {
       expect(result.totalPoints).toBe(10);
       expect(result.currentStreak).toBe(0);
       expect(result.longestStreak).toBe(0);
+    });
+  });
+
+  describe("getRecentPointsEvents", () => {
+    it("returns an empty list when the user has no events", () => {
+      const events = getRecentPointsEvents(base.user.id, 10);
+      expect(events).toEqual([]);
+    });
+
+    it("returns events newest-first with kind, points, and createdAt", () => {
+      vi.useFakeTimers();
+
+      vi.setSystemTime(new Date("2026-05-12T10:00:00Z"));
+      awardPointsForLessonComplete(base.user.id, createLesson().id);
+      vi.setSystemTime(new Date("2026-05-13T10:00:00Z"));
+      awardPointsForLessonComplete(base.user.id, createLesson().id);
+      vi.setSystemTime(new Date("2026-05-14T10:00:00Z"));
+      awardPointsForCourseComplete(base.user.id, base.course.id);
+
+      const events = getRecentPointsEvents(base.user.id, 10);
+
+      // Most recent first. The course_complete is the latest event.
+      expect(events[0].kind).toBe(schema.PointsEventKind.CourseComplete);
+      expect(events[0].points).toBe(100);
+      expect(events[0].createdAt).toBeTruthy();
+
+      // Each event has shape { kind, points, createdAt }
+      for (const e of events) {
+        expect(typeof e.kind).toBe("string");
+        expect(typeof e.points).toBe("number");
+        expect(typeof e.createdAt).toBe("string");
+      }
+
+      // Order is strictly descending by createdAt
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i - 1].createdAt >= events[i].createdAt).toBe(true);
+      }
+    });
+
+    it("respects the limit parameter", () => {
+      for (let i = 0; i < 8; i++) {
+        awardPointsForLessonComplete(base.user.id, createLesson().id);
+      }
+
+      const events = getRecentPointsEvents(base.user.id, 5);
+      expect(events.length).toBe(5);
+    });
+
+    it("only returns events for the requested user", () => {
+      const otherUser = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      awardPointsForLessonComplete(base.user.id, createLesson().id);
+      awardPointsForLessonComplete(otherUser.id, createLesson().id);
+
+      const events = getRecentPointsEvents(base.user.id, 10);
+      // base.user has lesson + streak_day = 2 rows. otherUser's events excluded.
+      expect(events.length).toBe(2);
     });
   });
 
