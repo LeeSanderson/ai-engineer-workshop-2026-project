@@ -51,4 +51,8 @@ export default [
   route("api/video-tracking", "routes/api.video-tracking.ts"),
   route("api/set-dev-country", "routes/api.set-dev-country.ts"),
   route("api/set-timezone", "routes/api.set-timezone.ts"),
+  route(
+    "api/dismiss-streak-banner",
+    "routes/api.dismiss-streak-banner.ts"
+  ),
 ] satisfies RouteConfig;

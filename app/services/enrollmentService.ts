@@ -10,6 +10,8 @@ import {
 } from "~/db/schema";
 import {
   awardPointsForCourseComplete,
+  detectLevelCrossed,
+  getUserTotalPoints,
   type FiredPointsEvent,
 } from "./pointsService";
 
@@ -126,8 +128,15 @@ export function markEnrollmentComplete(userId: number, courseId: number) {
 
   if (!result) return result;
 
+  const prevTotal = getUserTotalPoints(userId);
   const pointsEvents = awardPointsForCourseComplete(userId, courseId);
-  return { ...result, pointsEvents: pointsEvents as FiredPointsEvent[] };
+  const newTotal = getUserTotalPoints(userId);
+
+  return {
+    ...result,
+    pointsEvents: pointsEvents as FiredPointsEvent[],
+    levelCrossed: detectLevelCrossed(prevTotal, newTotal),
+  };
 }
 
 export function getUserEnrolledCourses(userId: number) {

@@ -10,6 +10,9 @@ import {
 } from "~/db/schema";
 import {
   awardPointsForLessonComplete,
+  detectLevelCrossed,
+  detectStreakMilestone,
+  getUserTotalPoints,
   type FiredPointsEvent,
 } from "./pointsService";
 import {
@@ -87,12 +90,18 @@ export function markLessonComplete(userId: number, lessonId: number) {
         .returning()
         .get();
 
+  const prevTotal = getUserTotalPoints(userId);
   const lessonEvents = awardPointsForLessonComplete(userId, lessonId);
   const courseEvents = maybeAutoCompleteCourse(userId, lessonId);
+  const newTotal = getUserTotalPoints(userId);
+
+  const pointsEvents = [...lessonEvents, ...courseEvents] as FiredPointsEvent[];
 
   return {
     ...progress,
-    pointsEvents: [...lessonEvents, ...courseEvents] as FiredPointsEvent[],
+    pointsEvents,
+    levelCrossed: detectLevelCrossed(prevTotal, newTotal),
+    streakMilestone: detectStreakMilestone(lessonEvents),
   };
 }
 

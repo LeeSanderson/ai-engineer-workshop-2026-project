@@ -27,6 +27,7 @@ import {
 } from "~/services/quizService";
 import { computeResult } from "~/services/quizScoringService";
 import type { FiredPointsEvent } from "~/services/pointsService";
+import { LEVELS } from "~/services/levelResolver";
 import { LessonProgressStatus, PointsEventKind } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -303,7 +304,12 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "mark-complete") {
     const result = markLessonComplete(currentUserId, lessonId);
-    return { success: true, pointsEvents: result.pointsEvents };
+    return {
+      success: true,
+      pointsEvents: result.pointsEvents,
+      levelCrossed: result.levelCrossed,
+      streakMilestone: result.streakMilestone,
+    };
   }
 
   if (intent === "submit-quiz") {
@@ -348,6 +354,25 @@ function formatPointsEventToast(ev: FiredPointsEvent): string {
     case PointsEventKind.StreakDay:
       return `+${ev.points} pts · Day ${ev.streakDayNumber ?? 1} of streak 🔥`;
   }
+}
+
+// Larger-tier celebration toast: a level-up event. Uses sonner's success
+// variant with a description so it's visually separable from the small
+// event toasts above.
+function fireLevelUpToast(levelIndex: number) {
+  const level = LEVELS.find((l) => l.index === levelIndex);
+  if (!level) return;
+  toast.success(`Level up! · You're now a ${level.name}`, {
+    description: `You reached Level ${level.index}.`,
+    duration: 6000,
+  });
+}
+
+function fireStreakMilestoneToast(milestone: number) {
+  toast.success(`🔥 ${milestone}-day streak!`, {
+    description: "Keep showing up — consistency compounds.",
+    duration: 6000,
+  });
 }
 
 const AUTOPLAY_KEY = "cadence-autoplay";
@@ -409,17 +434,23 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     fetcher.formData?.get("intent") === "mark-complete";
 
   const justCompleted = fetcher.data?.success;
-  const lessonCompletePointsEvents = fetcher.data?.pointsEvents;
+  const lessonCompleteData = fetcher.data;
 
   const isCompleted =
     lessonStatus === LessonProgressStatus.Completed || justCompleted;
 
   useEffect(() => {
-    if (!lessonCompletePointsEvents) return;
-    for (const ev of lessonCompletePointsEvents) {
+    if (!lessonCompleteData?.pointsEvents) return;
+    for (const ev of lessonCompleteData.pointsEvents) {
       toast(formatPointsEventToast(ev));
     }
-  }, [lessonCompletePointsEvents]);
+    if (lessonCompleteData.levelCrossed != null) {
+      fireLevelUpToast(lessonCompleteData.levelCrossed);
+    }
+    if (lessonCompleteData.streakMilestone != null) {
+      fireStreakMilestoneToast(lessonCompleteData.streakMilestone);
+    }
+  }, [lessonCompleteData]);
 
   // Navigate to next lesson after marking complete
   useEffect(() => {
@@ -823,6 +854,8 @@ function QuizSection({
       correctOptionId: number | null;
     }>;
     pointsEvents?: FiredPointsEvent[];
+    levelCrossed?: number | null;
+    streakMilestone?: number | null;
   } | null;
   quizFetcher: ReturnType<typeof useFetcher>;
   isSubmitting: boolean;
@@ -838,6 +871,12 @@ function QuizSection({
     if (quizResult.passed) {
       for (const ev of quizResult.pointsEvents ?? []) {
         toast(formatPointsEventToast(ev));
+      }
+      if (quizResult.levelCrossed != null) {
+        fireLevelUpToast(quizResult.levelCrossed);
+      }
+      if (quizResult.streakMilestone != null) {
+        fireStreakMilestoneToast(quizResult.streakMilestone);
       }
     } else {
       toast.error(

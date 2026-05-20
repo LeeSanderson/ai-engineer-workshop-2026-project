@@ -8,11 +8,13 @@ import {
   LessonProgressStatus,
   quizAttempts,
   enrollments,
+  dismissedStreakBanners,
 } from "~/db/schema";
 import { resolveLevel, type ResolvedLevel } from "./levelResolver";
 import {
   computeStreak,
   toCalendarDate,
+  type StreakEvent,
   type StreakResult,
 } from "./streakCalculator";
 
@@ -44,6 +46,44 @@ export interface FiredPointsEvent {
   kind: PointsEventKind;
   points: number;
   streakDayNumber?: number;
+}
+
+// Streak lengths that fire a celebration milestone toast.
+export const STREAK_MILESTONES: ReadonlySet<number> = new Set([
+  7, 30, 100, 365,
+]);
+
+export interface PointsSignals {
+  levelCrossed: number | null;
+  streakMilestone: number | null;
+}
+
+export function getUserTotalPoints(userId: number): number {
+  const row = db
+    .select({ total: sql<number>`COALESCE(SUM(${pointsEvents.points}), 0)` })
+    .from(pointsEvents)
+    .where(eq(pointsEvents.userId, userId))
+    .get();
+  return row?.total ?? 0;
+}
+
+export function detectLevelCrossed(
+  prevTotal: number,
+  newTotal: number
+): number | null {
+  const prevLevel = resolveLevel(prevTotal);
+  const newLevel = resolveLevel(newTotal);
+  return newLevel.index > prevLevel.index ? newLevel.index : null;
+}
+
+export function detectStreakMilestone(
+  events: FiredPointsEvent[]
+): number | null {
+  const streakEv = events.find((e) => e.kind === PointsEventKind.StreakDay);
+  if (!streakEv?.streakDayNumber) return null;
+  return STREAK_MILESTONES.has(streakEv.streakDayNumber)
+    ? streakEv.streakDayNumber
+    : null;
 }
 
 function computeCurrentStreakDayNumber(
@@ -362,6 +402,104 @@ export function getRecentPointsEvents(
     .orderBy(desc(pointsEvents.createdAt), desc(pointsEvents.id))
     .limit(limit)
     .all();
+}
+
+export interface StreakBannerData {
+  previousStreakLength: number;
+  lastActiveDate: string;
+}
+
+// Returns banner data when the user's most-recent run was ≥7 days, broken
+// (current streak is 0 and there's a gap between lastActiveDate and today),
+// and the user has not already dismissed the banner for that lastActiveDate.
+export function getStreakBannerData(
+  userId: number,
+  timezone: string,
+  now: Date = new Date()
+): StreakBannerData | null {
+  const eventRows: StreakEvent[] = db
+    .select({
+      timestamp: pointsEvents.createdAt,
+      kind: pointsEvents.kind,
+      isBackfill: pointsEvents.isBackfill,
+      streakDate: pointsEvents.streakDate,
+    })
+    .from(pointsEvents)
+    .where(eq(pointsEvents.userId, userId))
+    .all();
+
+  const streak = computeStreak(eventRows, timezone, now);
+  if (streak.currentStreak !== 0 || !streak.lastActiveDate) return null;
+
+  const previousStreakLength = computeRunLengthEndingAt(
+    eventRows,
+    timezone,
+    streak.lastActiveDate
+  );
+  if (previousStreakLength < 7) return null;
+
+  const dismissed = db
+    .select()
+    .from(dismissedStreakBanners)
+    .where(
+      and(
+        eq(dismissedStreakBanners.userId, userId),
+        eq(dismissedStreakBanners.lastActiveDate, streak.lastActiveDate)
+      )
+    )
+    .get();
+  if (dismissed) return null;
+
+  return {
+    previousStreakLength,
+    lastActiveDate: streak.lastActiveDate,
+  };
+}
+
+export function dismissStreakBanner(
+  userId: number,
+  lastActiveDate: string
+): void {
+  db.insert(dismissedStreakBanners)
+    .values({ userId, lastActiveDate })
+    .onConflictDoNothing()
+    .run();
+}
+
+function computeRunLengthEndingAt(
+  events: StreakEvent[],
+  timezone: string,
+  endDate: string
+): number {
+  const QUALIFYING: ReadonlySet<string> = new Set([
+    PointsEventKind.LessonComplete,
+    PointsEventKind.QuizPass,
+  ]);
+  const dates = new Set<string>();
+  for (const event of events) {
+    if (event.isBackfill) continue;
+    if (!QUALIFYING.has(event.kind)) continue;
+    const date = event.streakDate ?? toCalendarDate(event.timestamp, timezone);
+    dates.add(date);
+  }
+
+  if (!dates.has(endDate)) return 0;
+
+  let length = 1;
+  let cursor = endDate;
+  while (true) {
+    const prev = previousDate(cursor);
+    if (!dates.has(prev)) break;
+    length += 1;
+    cursor = prev;
+  }
+  return length;
+}
+
+function previousDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 export function getUserPoints(userId: number): UserPoints {

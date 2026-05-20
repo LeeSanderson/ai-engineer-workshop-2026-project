@@ -19,6 +19,10 @@ import {
   backfillUserPoints,
   getUserPoints,
   getRecentPointsEvents,
+  getStreakBannerData,
+  dismissStreakBanner,
+  detectLevelCrossed,
+  detectStreakMilestone,
 } from "./pointsService";
 
 function createLesson() {
@@ -670,6 +674,179 @@ describe("pointsService", () => {
       const events = getRecentPointsEvents(base.user.id, 10);
       // base.user has lesson + streak_day = 2 rows. otherUser's events excluded.
       expect(events.length).toBe(2);
+    });
+  });
+
+  describe("signal helpers", () => {
+    it("detectLevelCrossed returns the new index when total crosses a threshold", () => {
+      expect(detectLevelCrossed(49, 64)).toBe(2);
+    });
+
+    it("detectLevelCrossed returns null when level stays the same", () => {
+      expect(detectLevelCrossed(10, 40)).toBeNull();
+    });
+
+    it("detectLevelCrossed returns the highest crossed level when multiple are crossed", () => {
+      // 0 → 700 crosses Levels 2, 3, 4, 5; expect 5 (Apprentice)
+      expect(detectLevelCrossed(0, 700)).toBe(5);
+    });
+
+    it("detectStreakMilestone returns the milestone when a streak_day fired at 7", () => {
+      expect(
+        detectStreakMilestone([
+          {
+            kind: schema.PointsEventKind.StreakDay,
+            points: 5,
+            streakDayNumber: 7,
+          },
+        ])
+      ).toBe(7);
+    });
+
+    it("detectStreakMilestone returns null when streak length is non-milestone", () => {
+      expect(
+        detectStreakMilestone([
+          {
+            kind: schema.PointsEventKind.StreakDay,
+            points: 5,
+            streakDayNumber: 8,
+          },
+        ])
+      ).toBeNull();
+    });
+
+    it("detectStreakMilestone returns null when no streak_day event was fired", () => {
+      expect(
+        detectStreakMilestone([
+          {
+            kind: schema.PointsEventKind.LessonComplete,
+            points: 10,
+          },
+        ])
+      ).toBeNull();
+    });
+  });
+
+  describe("getStreakBannerData", () => {
+    it("returns null when the user has no events", () => {
+      const banner = getStreakBannerData(
+        base.user.id,
+        "UTC",
+        new Date("2026-05-14T12:00:00Z")
+      );
+      expect(banner).toBeNull();
+    });
+
+    it("returns null when the current streak is active today", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-14T10:00:00Z"));
+      // Build a 10-day run ending today
+      for (let i = 0; i < 10; i++) {
+        const d = new Date(`2026-05-${String(5 + i).padStart(2, "0")}T10:00:00Z`);
+        vi.setSystemTime(d);
+        awardPointsForLessonComplete(base.user.id, createLesson().id);
+      }
+
+      const banner = getStreakBannerData(
+        base.user.id,
+        "UTC",
+        new Date("2026-05-14T20:00:00Z")
+      );
+      expect(banner).toBeNull();
+    });
+
+    it("returns null when the previous run was shorter than 7 days", () => {
+      vi.useFakeTimers();
+      // 4-day run ending 2026-05-05
+      for (let i = 0; i < 4; i++) {
+        vi.setSystemTime(
+          new Date(`2026-05-0${2 + i}T10:00:00Z`)
+        );
+        awardPointsForLessonComplete(base.user.id, createLesson().id);
+      }
+
+      const banner = getStreakBannerData(
+        base.user.id,
+        "UTC",
+        new Date("2026-05-14T12:00:00Z")
+      );
+      expect(banner).toBeNull();
+    });
+
+    it("returns banner data when the previous run was ≥ 7 days and is broken", () => {
+      vi.useFakeTimers();
+      // 12-day run from 2026-04-29 → 2026-05-10
+      const start = new Date("2026-04-29T10:00:00Z").getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 12; i++) {
+        vi.setSystemTime(new Date(start + i * dayMs));
+        awardPointsForLessonComplete(base.user.id, createLesson().id);
+      }
+
+      // "Now" is 2026-05-14 — five days after the last active day, well past the
+      // one-day grace window, so currentStreak resets to 0.
+      const banner = getStreakBannerData(
+        base.user.id,
+        "UTC",
+        new Date("2026-05-14T12:00:00Z")
+      );
+      expect(banner).toEqual({
+        previousStreakLength: 12,
+        lastActiveDate: "2026-05-10",
+      });
+    });
+
+    it("returns null after the banner has been dismissed for that lastActiveDate", () => {
+      vi.useFakeTimers();
+      const start = new Date("2026-04-29T10:00:00Z").getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 12; i++) {
+        vi.setSystemTime(new Date(start + i * dayMs));
+        awardPointsForLessonComplete(base.user.id, createLesson().id);
+      }
+
+      dismissStreakBanner(base.user.id, "2026-05-10");
+
+      const banner = getStreakBannerData(
+        base.user.id,
+        "UTC",
+        new Date("2026-05-14T12:00:00Z")
+      );
+      expect(banner).toBeNull();
+    });
+
+    it("dismissing one user's banner does not affect another user", () => {
+      vi.useFakeTimers();
+      const otherUser = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+
+      const start = new Date("2026-04-29T10:00:00Z").getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 12; i++) {
+        vi.setSystemTime(new Date(start + i * dayMs));
+        const lesson = createLesson();
+        awardPointsForLessonComplete(base.user.id, lesson.id);
+        awardPointsForLessonComplete(otherUser.id, lesson.id);
+      }
+
+      dismissStreakBanner(base.user.id, "2026-05-10");
+
+      const otherBanner = getStreakBannerData(
+        otherUser.id,
+        "UTC",
+        new Date("2026-05-14T12:00:00Z")
+      );
+      expect(otherBanner).toEqual({
+        previousStreakLength: 12,
+        lastActiveDate: "2026-05-10",
+      });
     });
   });
 

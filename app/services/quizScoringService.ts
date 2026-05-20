@@ -8,7 +8,12 @@ import {
   quizAnswers,
 } from "~/db/schema";
 import Database from "better-sqlite3";
-import { awardPointsForQuizAttempt } from "./pointsService";
+import {
+  awardPointsForQuizAttempt,
+  detectLevelCrossed,
+  detectStreakMilestone,
+  getUserTotalPoints,
+} from "./pointsService";
 import type { FiredPointsEvent } from "./pointsService";
 
 const rawDb = new Database("data.db");
@@ -262,11 +267,13 @@ export function computeResult(
       }
     }
 
+    const prevTotal = getUserTotalPoints(userId);
     const pointsEvents = awardPointsForQuizAttempt(userId, {
       quizId,
       score: scoreValue,
       passed,
     });
+    const newTotal = getUserTotalPoints(userId);
 
     return {
       attemptId: attempt.id,
@@ -277,6 +284,8 @@ export function computeResult(
       totalQuestions: total,
       questionResults,
       pointsEvents: pointsEvents as FiredPointsEvent[],
+      levelCrossed: detectLevelCrossed(prevTotal, newTotal),
+      streakMilestone: detectStreakMilestone(pointsEvents),
     };
   } catch (e) {
     console.log(e);

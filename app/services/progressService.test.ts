@@ -125,6 +125,121 @@ describe("progressService", () => {
     });
   });
 
+  describe("markLessonComplete — signals", () => {
+    it("returns levelCrossed = 2 when total crosses the Level 2 threshold (49 → 64)", () => {
+      // Seed user with 49 pts of backfill data: 4 lesson_complete (40) + 1 quiz_perfect (15) = 55
+      // Need exactly 49 → use a fabricated points value. Tests can write events directly.
+      // Easiest path: 4 lesson_complete events (40 pts) + 1 backfilled streak_day-style event of 9pts.
+      // But streak_day-only-9 isn't a valid kind shape. Instead, write 4 lesson_complete + 1 quiz_pass=25 → 65; too much.
+      // Use a custom row: kind=lesson_complete, points=49 (valid schema). We write directly to bypass the unique index.
+      testDb
+        .insert(schema.pointsEvents)
+        .values({
+          userId: base.user.id,
+          kind: schema.PointsEventKind.LessonComplete,
+          points: 49,
+          lessonId: null,
+          isBackfill: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })
+        .run();
+
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+      const result = markLessonComplete(base.user.id, lessons[0].id);
+
+      // 49 backfill + 10 lesson + 5 streak_day = 64 → Level 2 (threshold 50)
+      expect(result.levelCrossed).toBe(2);
+    });
+
+    it("returns levelCrossed = null when no level threshold is crossed", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+      const result = markLessonComplete(base.user.id, lessons[0].id);
+      // 0 + 10 + 5 = 15 → still Level 1
+      expect(result.levelCrossed).toBeNull();
+    });
+
+    it("does not signal a level cross on a fresh award when prior backfill already placed user at that level", () => {
+      // Backfill the user to ~770 pts (Level 5 = Apprentice, threshold 700).
+      testDb
+        .insert(schema.pointsEvents)
+        .values({
+          userId: base.user.id,
+          kind: schema.PointsEventKind.LessonComplete,
+          points: 770,
+          lessonId: null,
+          isBackfill: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })
+        .run();
+
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
+      const result = markLessonComplete(base.user.id, lessons[0].id);
+      // 770 + 10 + 5 = 785 → still Level 5
+      expect(result.levelCrossed).toBeNull();
+    });
+
+    it("returns streakMilestone = 7 on a 6 → 7 day transition", () => {
+      vi.useFakeTimers();
+
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 7);
+
+      const days = [
+        "2026-05-08T10:00:00Z",
+        "2026-05-09T10:00:00Z",
+        "2026-05-10T10:00:00Z",
+        "2026-05-11T10:00:00Z",
+        "2026-05-12T10:00:00Z",
+        "2026-05-13T10:00:00Z",
+        "2026-05-14T10:00:00Z",
+      ];
+
+      let lastResult;
+      for (let i = 0; i < days.length; i++) {
+        vi.setSystemTime(new Date(days[i]));
+        lastResult = markLessonComplete(base.user.id, lessons[i].id);
+      }
+
+      expect(lastResult!.streakMilestone).toBe(7);
+      vi.useRealTimers();
+    });
+
+    it("returns streakMilestone = null on a 7 → 8 day transition", () => {
+      vi.useFakeTimers();
+
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 8);
+
+      const days = [
+        "2026-05-08T10:00:00Z",
+        "2026-05-09T10:00:00Z",
+        "2026-05-10T10:00:00Z",
+        "2026-05-11T10:00:00Z",
+        "2026-05-12T10:00:00Z",
+        "2026-05-13T10:00:00Z",
+        "2026-05-14T10:00:00Z",
+        "2026-05-15T10:00:00Z",
+      ];
+
+      let lastResult;
+      for (let i = 0; i < days.length; i++) {
+        vi.setSystemTime(new Date(days[i]));
+        lastResult = markLessonComplete(base.user.id, lessons[i].id);
+      }
+
+      expect(lastResult!.streakMilestone).toBeNull();
+      vi.useRealTimers();
+    });
+
+    it("returns streakMilestone = null when no streak_day event fires (same-day repeat)", () => {
+      const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 2);
+
+      markLessonComplete(base.user.id, lessons[0].id);
+      const second = markLessonComplete(base.user.id, lessons[1].id);
+
+      // Streak day already exists for today; no new streak_day event, so no milestone.
+      expect(second.streakMilestone).toBeNull();
+    });
+  });
+
   describe("markLessonComplete — course auto-completion", () => {
     it("marks the enrollment complete when the final lesson is completed", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);

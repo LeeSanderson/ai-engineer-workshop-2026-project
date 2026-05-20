@@ -1,17 +1,21 @@
-import { Link } from "react-router";
+import { Link, useFetcher } from "react-router";
 import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount, getTotalLessonCount, getNextIncompleteLesson } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
-import { getUserPoints, getRecentPointsEvents } from "~/services/pointsService";
+import {
+  getUserPoints,
+  getRecentPointsEvents,
+  getStreakBannerData,
+} from "~/services/pointsService";
 import { LEVELS } from "~/services/levelResolver";
 import { toCalendarDate } from "~/services/streakCalculator";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, CheckCircle2, GraduationCap, PlayCircle } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Flame, GraduationCap, PlayCircle, X } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { GamificationPanel } from "~/components/gamification-panel";
 import { data, isRouteErrorResponse } from "react-router";
@@ -66,35 +70,39 @@ export async function loader({ request }: Route.LoaderArgs) {
   const inProgressCourses = coursesWithProgress.filter((c) => !c.isCompleted);
 
   const currentUser = getUserById(currentUserId);
-  const gamification =
-    currentUser?.role === UserRole.Student
-      ? (() => {
-          const points = getUserPoints(currentUserId);
-          const timezone = currentUser.timezone ?? "UTC";
-          const today = toCalendarDate(new Date().toISOString(), timezone);
-          const nextLevel =
-            points.level.nextThreshold !== null
-              ? LEVELS.find((l) => l.threshold === points.level.nextThreshold) ?? null
-              : null;
-          const levelSpan = nextLevel
-            ? nextLevel.threshold - points.level.threshold
+  const isStudent = currentUser?.role === UserRole.Student;
+  const timezone = currentUser?.timezone ?? "UTC";
+  const gamification = isStudent
+    ? (() => {
+        const points = getUserPoints(currentUserId);
+        const today = toCalendarDate(new Date().toISOString(), timezone);
+        const nextLevel =
+          points.level.nextThreshold !== null
+            ? LEVELS.find((l) => l.threshold === points.level.nextThreshold) ?? null
             : null;
-          return {
-            totalPoints: points.totalPoints,
-            levelName: points.level.name,
-            nextLevelName: nextLevel?.name ?? null,
-            pointsIntoLevel: points.level.pointsIntoLevel,
-            levelSpan,
-            pointsToNextLevel: points.level.pointsToNextLevel,
-            currentStreak: points.currentStreak,
-            longestStreak: points.longestStreak,
-            activeToday: points.lastActiveDate === today,
-            recentEvents: getRecentPointsEvents(currentUserId, 8),
-          };
-        })()
-      : null;
+        const levelSpan = nextLevel
+          ? nextLevel.threshold - points.level.threshold
+          : null;
+        return {
+          totalPoints: points.totalPoints,
+          levelName: points.level.name,
+          nextLevelName: nextLevel?.name ?? null,
+          pointsIntoLevel: points.level.pointsIntoLevel,
+          levelSpan,
+          pointsToNextLevel: points.level.pointsToNextLevel,
+          currentStreak: points.currentStreak,
+          longestStreak: points.longestStreak,
+          activeToday: points.lastActiveDate === today,
+          recentEvents: getRecentPointsEvents(currentUserId, 8),
+        };
+      })()
+    : null;
 
-  return { inProgressCourses, completedCourses, gamification };
+  const streakBanner = isStudent
+    ? getStreakBannerData(currentUserId, timezone)
+    : null;
+
+  return { inProgressCourses, completedCourses, gamification, streakBanner };
 }
 
 function DashboardCardSkeleton() {
@@ -137,7 +145,8 @@ export function HydrateFallback() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { inProgressCourses, completedCourses, gamification } = loaderData;
+  const { inProgressCourses, completedCourses, gamification, streakBanner } =
+    loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
 
   return (
@@ -157,6 +166,13 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           Track your learning progress
         </p>
       </div>
+
+      {streakBanner && (
+        <StreakResetBanner
+          previousStreakLength={streakBanner.previousStreakLength}
+          lastActiveDate={streakBanner.lastActiveDate}
+        />
+      )}
 
       {gamification && <GamificationPanel {...gamification} />}
 
@@ -296,6 +312,45 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function StreakResetBanner({
+  previousStreakLength,
+  lastActiveDate,
+}: {
+  previousStreakLength: number;
+  lastActiveDate: string;
+}) {
+  const fetcher = useFetcher();
+  const dismissing = fetcher.state !== "idle";
+
+  return (
+    <div className="mb-6 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+      <div className="flex items-center gap-3">
+        <Flame className="size-5 shrink-0 text-amber-600" />
+        <div>
+          <p className="font-medium">
+            Your {previousStreakLength}-day streak ended.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Start a new one today.
+          </p>
+        </div>
+      </div>
+      <fetcher.Form method="post" action="/api/dismiss-streak-banner">
+        <input type="hidden" name="lastActiveDate" value={lastActiveDate} />
+        <Button
+          type="submit"
+          variant="ghost"
+          size="sm"
+          disabled={dismissing}
+          aria-label="Dismiss streak reset banner"
+        >
+          <X className="size-4" />
+        </Button>
+      </fetcher.Form>
     </div>
   );
 }
