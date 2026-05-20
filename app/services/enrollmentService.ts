@@ -8,7 +8,10 @@ import {
   lessonProgress,
   LessonProgressStatus,
 } from "~/db/schema";
-import { awardPointsForCourseComplete } from "./pointsService";
+import {
+  awardPointsForCourseComplete,
+  type FiredPointsEvent,
+} from "./pointsService";
 
 // ─── Enrollment Service ───
 // Handles enrollment, unenrollment, duplicate prevention, and enrollment validation.
@@ -121,11 +124,10 @@ export function markEnrollmentComplete(userId: number, courseId: number) {
     .returning()
     .get();
 
-  if (result) {
-    awardPointsForCourseComplete(userId, courseId);
-  }
+  if (!result) return result;
 
-  return result;
+  const pointsEvents = awardPointsForCourseComplete(userId, courseId);
+  return { ...result, pointsEvents: pointsEvents as FiredPointsEvent[] };
 }
 
 export function getUserEnrolledCourses(userId: number) {

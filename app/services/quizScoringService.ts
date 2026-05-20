@@ -9,6 +9,7 @@ import {
 } from "~/db/schema";
 import Database from "better-sqlite3";
 import { awardPointsForQuizAttempt } from "./pointsService";
+import type { FiredPointsEvent } from "./pointsService";
 
 const rawDb = new Database("data.db");
 
@@ -261,7 +262,7 @@ export function computeResult(
       }
     }
 
-    awardPointsForQuizAttempt(userId, {
+    const pointsEvents = awardPointsForQuizAttempt(userId, {
       quizId,
       score: scoreValue,
       passed,
@@ -275,6 +276,7 @@ export function computeResult(
       totalCorrect: correct,
       totalQuestions: total,
       questionResults,
+      pointsEvents: pointsEvents as FiredPointsEvent[],
     };
   } catch (e) {
     console.log(e);

@@ -26,7 +26,8 @@ import {
   getBestAttempt,
 } from "~/services/quizService";
 import { computeResult } from "~/services/quizScoringService";
-import { LessonProgressStatus } from "~/db/schema";
+import type { FiredPointsEvent } from "~/services/pointsService";
+import { LessonProgressStatus, PointsEventKind } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -301,8 +302,8 @@ export async function action({ params, request }: Route.ActionArgs) {
   const intent = formData.get("intent");
 
   if (intent === "mark-complete") {
-    markLessonComplete(currentUserId, lessonId);
-    return { success: true };
+    const result = markLessonComplete(currentUserId, lessonId);
+    return { success: true, pointsEvents: result.pointsEvents };
   }
 
   if (intent === "submit-quiz") {
@@ -332,6 +333,21 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   throw data("Invalid action", { status: 400 });
+}
+
+function formatPointsEventToast(ev: FiredPointsEvent): string {
+  switch (ev.kind) {
+    case PointsEventKind.LessonComplete:
+      return `+${ev.points} pts · Lesson complete`;
+    case PointsEventKind.QuizPass:
+      return `+${ev.points} pts · Quiz passed`;
+    case PointsEventKind.QuizPerfect:
+      return `+${ev.points} pts · Perfect score`;
+    case PointsEventKind.CourseComplete:
+      return `+${ev.points} pts · Course complete!`;
+    case PointsEventKind.StreakDay:
+      return `+${ev.points} pts · Day ${ev.streakDayNumber ?? 1} of streak 🔥`;
+  }
 }
 
 const AUTOPLAY_KEY = "cadence-autoplay";
@@ -393,9 +409,17 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     fetcher.formData?.get("intent") === "mark-complete";
 
   const justCompleted = fetcher.data?.success;
+  const lessonCompletePointsEvents = fetcher.data?.pointsEvents;
 
   const isCompleted =
     lessonStatus === LessonProgressStatus.Completed || justCompleted;
+
+  useEffect(() => {
+    if (!lessonCompletePointsEvents) return;
+    for (const ev of lessonCompletePointsEvents) {
+      toast(formatPointsEventToast(ev));
+    }
+  }, [lessonCompletePointsEvents]);
 
   // Navigate to next lesson after marking complete
   useEffect(() => {
@@ -798,6 +822,7 @@ function QuizSection({
       selectedOptionId: number | null;
       correctOptionId: number | null;
     }>;
+    pointsEvents?: FiredPointsEvent[];
   } | null;
   quizFetcher: ReturnType<typeof useFetcher>;
   isSubmitting: boolean;
@@ -809,16 +834,15 @@ function QuizSection({
   const [retaking, setRetaking] = useState(false);
 
   useEffect(() => {
-    if (quizResult && !retaking) {
-      if (quizResult.passed) {
-        toast.success(
-          `Quiz passed! Score: ${Math.round(quizResult.score * 100)}%`
-        );
-      } else {
-        toast.error(
-          `Quiz not passed. Score: ${Math.round(quizResult.score * 100)}%`
-        );
+    if (!quizResult || retaking) return;
+    if (quizResult.passed) {
+      for (const ev of quizResult.pointsEvents ?? []) {
+        toast(formatPointsEventToast(ev));
       }
+    } else {
+      toast.error(
+        `Quiz not passed. Score: ${Math.round(quizResult.score * 100)}%`
+      );
     }
   }, [quizResult, retaking]);
 

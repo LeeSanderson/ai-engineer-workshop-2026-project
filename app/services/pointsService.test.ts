@@ -74,6 +74,125 @@ describe("pointsService", () => {
     vi.useRealTimers();
   });
 
+  describe("fired-event return values", () => {
+    it("awardPointsForLessonComplete returns lesson_complete + streak_day on first call", () => {
+      const lesson = createLesson();
+
+      const fired = awardPointsForLessonComplete(base.user.id, lesson.id);
+
+      expect(fired).toHaveLength(2);
+      const lessonEv = fired.find(
+        (e) => e.kind === schema.PointsEventKind.LessonComplete
+      );
+      const streakEv = fired.find(
+        (e) => e.kind === schema.PointsEventKind.StreakDay
+      );
+      expect(lessonEv).toEqual({
+        kind: schema.PointsEventKind.LessonComplete,
+        points: 10,
+      });
+      expect(streakEv?.points).toBe(5);
+      expect(streakEv?.streakDayNumber).toBe(1);
+    });
+
+    it("awardPointsForLessonComplete returns [] on a duplicate (already-completed) call", () => {
+      const lesson = createLesson();
+      awardPointsForLessonComplete(base.user.id, lesson.id);
+
+      const fired = awardPointsForLessonComplete(base.user.id, lesson.id);
+      expect(fired).toEqual([]);
+    });
+
+    it("awardPointsForLessonComplete returns only lesson_complete when streak_day already exists today", () => {
+      const l1 = createLesson();
+      const l2 = createLesson();
+      awardPointsForLessonComplete(base.user.id, l1.id);
+
+      const fired = awardPointsForLessonComplete(base.user.id, l2.id);
+      expect(fired).toEqual([
+        { kind: schema.PointsEventKind.LessonComplete, points: 10 },
+      ]);
+    });
+
+    it("streakDayNumber on lesson_complete reflects consecutive-day count", () => {
+      vi.useFakeTimers();
+
+      vi.setSystemTime(new Date("2026-05-12T10:00:00Z"));
+      awardPointsForLessonComplete(base.user.id, createLesson().id);
+
+      vi.setSystemTime(new Date("2026-05-13T10:00:00Z"));
+      awardPointsForLessonComplete(base.user.id, createLesson().id);
+
+      vi.setSystemTime(new Date("2026-05-14T10:00:00Z"));
+      const fired = awardPointsForLessonComplete(
+        base.user.id,
+        createLesson().id
+      );
+
+      const streakEv = fired.find(
+        (e) => e.kind === schema.PointsEventKind.StreakDay
+      );
+      expect(streakEv?.streakDayNumber).toBe(3);
+    });
+
+    it("awardPointsForQuizAttempt returns quiz_pass + quiz_perfect + streak_day on a perfect first pass", () => {
+      const quiz = createQuiz();
+
+      const fired = awardPointsForQuizAttempt(base.user.id, {
+        quizId: quiz.id,
+        score: 1.0,
+        passed: true,
+      });
+
+      expect(fired.map((e) => e.kind).sort()).toEqual(
+        [
+          schema.PointsEventKind.QuizPass,
+          schema.PointsEventKind.QuizPerfect,
+          schema.PointsEventKind.StreakDay,
+        ].sort()
+      );
+    });
+
+    it("awardPointsForQuizAttempt returns [] on a failing attempt", () => {
+      const quiz = createQuiz();
+      const fired = awardPointsForQuizAttempt(base.user.id, {
+        quizId: quiz.id,
+        score: 0.5,
+        passed: false,
+      });
+      expect(fired).toEqual([]);
+    });
+
+    it("awardPointsForQuizAttempt returns only quiz_perfect when pass and streak_day are already recorded", () => {
+      const quiz = createQuiz();
+      awardPointsForQuizAttempt(base.user.id, {
+        quizId: quiz.id,
+        score: 0.8,
+        passed: true,
+      });
+
+      const fired = awardPointsForQuizAttempt(base.user.id, {
+        quizId: quiz.id,
+        score: 1.0,
+        passed: true,
+      });
+
+      expect(fired).toEqual([
+        { kind: schema.PointsEventKind.QuizPerfect, points: 15 },
+      ]);
+    });
+
+    it("awardPointsForCourseComplete returns the course_complete event on first call, [] on duplicate", () => {
+      const first = awardPointsForCourseComplete(base.user.id, base.course.id);
+      expect(first).toEqual([
+        { kind: schema.PointsEventKind.CourseComplete, points: 100 },
+      ]);
+
+      const second = awardPointsForCourseComplete(base.user.id, base.course.id);
+      expect(second).toEqual([]);
+    });
+  });
+
   describe("awardPointsForLessonComplete", () => {
     it("writes a lesson_complete event worth 10 points", () => {
       const lesson = createLesson();
