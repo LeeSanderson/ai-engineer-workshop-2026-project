@@ -26,8 +26,10 @@ import {
   getBestAttempt,
 } from "~/services/quizService";
 import { computeResult } from "~/services/quizScoringService";
-import type { FiredPointsEvent } from "~/services/pointsService";
-import { LEVELS } from "~/services/levelResolver";
+import type {
+  FiredPointsEvent,
+  LevelCrossed,
+} from "~/services/gamification";
 import { LessonProgressStatus, PointsEventKind } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -306,7 +308,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     const result = markLessonComplete(currentUserId, lessonId);
     return {
       success: true,
-      pointsEvents: result.pointsEvents,
+      pointsEvents: result.fired,
       levelCrossed: result.levelCrossed,
       streakMilestone: result.streakMilestone,
     };
@@ -359,9 +361,7 @@ function formatPointsEventToast(ev: FiredPointsEvent): string {
 // Larger-tier celebration toast: a level-up event. Uses sonner's success
 // variant with a description so it's visually separable from the small
 // event toasts above.
-function fireLevelUpToast(levelIndex: number) {
-  const level = LEVELS.find((l) => l.index === levelIndex);
-  if (!level) return;
+function fireLevelUpToast(level: LevelCrossed) {
   toast.success(`Level up! · You're now a ${level.name}`, {
     description: `You reached Level ${level.index}.`,
     duration: 6000,
@@ -854,7 +854,7 @@ function QuizSection({
       correctOptionId: number | null;
     }>;
     pointsEvents?: FiredPointsEvent[];
-    levelCrossed?: number | null;
+    levelCrossed?: LevelCrossed | null;
     streakMilestone?: number | null;
   } | null;
   quizFetcher: ReturnType<typeof useFetcher>;

@@ -220,38 +220,6 @@ describe("enrollmentService", () => {
       expect(result!.completedAt).toBeDefined();
       expect(result!.completedAt).not.toBeNull();
     });
-
-    it("writes a course_complete points event worth 100 points", () => {
-      enrollUser(base.user.id, base.course.id, false, false);
-
-      markEnrollmentComplete(base.user.id, base.course.id);
-
-      const events = testDb
-        .select()
-        .from(schema.pointsEvents)
-        .where(eq(schema.pointsEvents.userId, base.user.id))
-        .all();
-
-      expect(events).toHaveLength(1);
-      expect(events[0].kind).toBe(schema.PointsEventKind.CourseComplete);
-      expect(events[0].points).toBe(100);
-      expect(events[0].courseId).toBe(base.course.id);
-    });
-
-    it("is idempotent on a second call: still only one course_complete event", () => {
-      enrollUser(base.user.id, base.course.id, false, false);
-
-      markEnrollmentComplete(base.user.id, base.course.id);
-      markEnrollmentComplete(base.user.id, base.course.id);
-
-      const events = testDb
-        .select()
-        .from(schema.pointsEvents)
-        .where(eq(schema.pointsEvents.userId, base.user.id))
-        .all();
-
-      expect(events).toHaveLength(1);
-    });
   });
 
   describe("getUserEnrolledCourses", () => {

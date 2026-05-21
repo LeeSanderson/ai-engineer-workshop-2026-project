@@ -2,7 +2,7 @@ import { data } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/api.dismiss-streak-banner";
 import { getCurrentUserId } from "~/lib/session";
-import { dismissStreakBanner } from "~/services/pointsService";
+import { dismissStreakBanner } from "~/services/gamification";
 import { parseFormData } from "~/lib/validation";
 
 const schema = z.object({

@@ -3,15 +3,10 @@ import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount, getTotalLessonCount, getNextIncompleteLesson } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
-import { getUserById } from "~/services/userService";
 import {
-  getUserPoints,
-  getRecentPointsEvents,
-  getStreakBannerData,
-} from "~/services/pointsService";
-import { LEVELS } from "~/services/levelResolver";
-import { toCalendarDate } from "~/services/streakCalculator";
-import { UserRole } from "~/db/schema";
+  getDashboardGamification,
+  getStreakBanner,
+} from "~/services/gamification";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -69,38 +64,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const completedCourses = coursesWithProgress.filter((c) => c.isCompleted);
   const inProgressCourses = coursesWithProgress.filter((c) => !c.isCompleted);
 
-  const currentUser = getUserById(currentUserId);
-  const isStudent = currentUser?.role === UserRole.Student;
-  const timezone = currentUser?.timezone ?? "UTC";
-  const gamification = isStudent
-    ? (() => {
-        const points = getUserPoints(currentUserId);
-        const today = toCalendarDate(new Date().toISOString(), timezone);
-        const nextLevel =
-          points.level.nextThreshold !== null
-            ? LEVELS.find((l) => l.threshold === points.level.nextThreshold) ?? null
-            : null;
-        const levelSpan = nextLevel
-          ? nextLevel.threshold - points.level.threshold
-          : null;
-        return {
-          totalPoints: points.totalPoints,
-          levelName: points.level.name,
-          nextLevelName: nextLevel?.name ?? null,
-          pointsIntoLevel: points.level.pointsIntoLevel,
-          levelSpan,
-          pointsToNextLevel: points.level.pointsToNextLevel,
-          currentStreak: points.currentStreak,
-          longestStreak: points.longestStreak,
-          activeToday: points.lastActiveDate === today,
-          recentEvents: getRecentPointsEvents(currentUserId, 8),
-        };
-      })()
-    : null;
-
-  const streakBanner = isStudent
-    ? getStreakBannerData(currentUserId, timezone)
-    : null;
+  const gamification = getDashboardGamification(currentUserId);
+  const streakBanner = getStreakBanner(currentUserId);
 
   return { inProgressCourses, completedCourses, gamification, streakBanner };
 }

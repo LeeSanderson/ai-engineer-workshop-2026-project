@@ -18,7 +18,7 @@ interface GamificationPanelProps {
   currentStreak: number;
   longestStreak: number;
   activeToday: boolean;
-  recentEvents: GamificationPanelEvent[];
+  recentEvents: ReadonlyArray<GamificationPanelEvent>;
 }
 
 const KIND_LABELS: Record<PointsEventKind, string> = {

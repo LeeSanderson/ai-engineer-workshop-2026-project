@@ -5,20 +5,9 @@ import {
   lessons,
   modules,
   courses,
-  enrollments,
   LessonProgressStatus,
 } from "~/db/schema";
-import {
-  awardPointsForLessonComplete,
-  detectLevelCrossed,
-  detectStreakMilestone,
-  getUserTotalPoints,
-  type FiredPointsEvent,
-} from "./pointsService";
-import {
-  findEnrollment,
-  markEnrollmentComplete,
-} from "./enrollmentService";
+import { onLessonCompleted } from "./gamification";
 
 // ─── Progress Service ───
 // Handles lesson completion tracking and course progress calculation.
@@ -90,45 +79,7 @@ export function markLessonComplete(userId: number, lessonId: number) {
         .returning()
         .get();
 
-  const prevTotal = getUserTotalPoints(userId);
-  const lessonEvents = awardPointsForLessonComplete(userId, lessonId);
-  const courseEvents = maybeAutoCompleteCourse(userId, lessonId);
-  const newTotal = getUserTotalPoints(userId);
-
-  const pointsEvents = [...lessonEvents, ...courseEvents] as FiredPointsEvent[];
-
-  return {
-    ...progress,
-    pointsEvents,
-    levelCrossed: detectLevelCrossed(prevTotal, newTotal),
-    streakMilestone: detectStreakMilestone(lessonEvents),
-  };
-}
-
-function maybeAutoCompleteCourse(
-  userId: number,
-  lessonId: number
-): FiredPointsEvent[] {
-  const row = db
-    .select({ courseId: modules.courseId })
-    .from(lessons)
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .where(eq(lessons.id, lessonId))
-    .get();
-  if (!row) return [];
-
-  const enrollment = findEnrollment(userId, row.courseId);
-  if (!enrollment || enrollment.completedAt !== null) return [];
-
-  const total = getTotalLessonCount(row.courseId);
-  if (total === 0) return [];
-
-  const completed = getCompletedLessonCount(userId, row.courseId);
-  if (completed >= total) {
-    const result = markEnrollmentComplete(userId, row.courseId);
-    return result?.pointsEvents ?? [];
-  }
-  return [];
+  return { ...progress, ...onLessonCompleted(userId, lessonId) };
 }
 
 export function markLessonInProgress(userId: number, lessonId: number) {

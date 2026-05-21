@@ -12,10 +12,9 @@ import {
   getCompletedLessonCount,
   getTotalLessonCount,
 } from "~/services/progressService";
-import { getUserPoints } from "~/services/pointsService";
+import { getSidebarGamification } from "~/services/gamification";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { isTeamAdmin } from "~/services/teamService";
-import { UserRole } from "~/db/schema";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
@@ -24,24 +23,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const devCountry = await getDevCountry(request);
   const countryTierInfo = getCountryTierInfo(devCountry);
 
-  const userPoints =
-    currentUserId && currentUser?.role === UserRole.Student
-      ? (() => {
-          const points = getUserPoints(currentUserId);
-          const todayLocal = new Intl.DateTimeFormat("en-CA", {
-            timeZone: currentUser?.timezone ?? "UTC",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          }).format(new Date());
-          return {
-            totalPoints: points.totalPoints,
-            levelName: points.level.name,
-            currentStreak: points.currentStreak,
-            activeToday: points.lastActiveDate === todayLocal,
-          };
-        })()
-      : null;
+  const userPoints = currentUserId
+    ? getSidebarGamification(currentUserId)
+    : null;
 
   const recentCourses = currentUserId
     ? getRecentlyProgressedCourses(currentUserId).map((course) => {

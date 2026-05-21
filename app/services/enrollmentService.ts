@@ -1,19 +1,6 @@
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "~/db";
-import {
-  enrollments,
-  courses,
-  modules,
-  lessons,
-  lessonProgress,
-  LessonProgressStatus,
-} from "~/db/schema";
-import {
-  awardPointsForCourseComplete,
-  detectLevelCrossed,
-  getUserTotalPoints,
-  type FiredPointsEvent,
-} from "./pointsService";
+import { enrollments, courses } from "~/db/schema";
 
 // ─── Enrollment Service ───
 // Handles enrollment, unenrollment, duplicate prevention, and enrollment validation.
@@ -117,7 +104,7 @@ export function unenrollUser(userId: number, courseId: number) {
 }
 
 export function markEnrollmentComplete(userId: number, courseId: number) {
-  const result = db
+  return db
     .update(enrollments)
     .set({ completedAt: new Date().toISOString() })
     .where(
@@ -125,18 +112,6 @@ export function markEnrollmentComplete(userId: number, courseId: number) {
     )
     .returning()
     .get();
-
-  if (!result) return result;
-
-  const prevTotal = getUserTotalPoints(userId);
-  const pointsEvents = awardPointsForCourseComplete(userId, courseId);
-  const newTotal = getUserTotalPoints(userId);
-
-  return {
-    ...result,
-    pointsEvents: pointsEvents as FiredPointsEvent[],
-    levelCrossed: detectLevelCrossed(prevTotal, newTotal),
-  };
 }
 
 export function getUserEnrolledCourses(userId: number) {
